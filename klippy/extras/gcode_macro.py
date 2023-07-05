@@ -50,11 +50,8 @@ class TemplateWrapper:
         try:
             self.template = env.from_string(script)
         except Exception as e:
-            # msg = "Error loading template '%s': %s" % (
-            #      name, traceback.format_exception_only(type(e), e)[-1])
-            msg = """{"code":"key164", "msg": "Error loading template '%s': %s", "values": ["%s", "%s"]}""" % (
-                name, traceback.format_exception_only(type(e), e)[-1], name, traceback.format_exception_only(type(e), e)[-1]
-            )
+            msg = "Error loading template '%s': %s" % (
+                 name, traceback.format_exception_only(type(e), e)[-1])
             logging.exception(msg)
             raise printer.config_error(msg)
     def render(self, context=None):
@@ -63,12 +60,8 @@ class TemplateWrapper:
         try:
             return str(self.template.render(context))
         except Exception as e:
-            # msg = "Error evaluating '%s': %s" % (
-            #     self.name, traceback.format_exception_only(type(e), e)[-1])
-            msg = """{"code":"key165", "msg": "Error evaluating '%s': %s", "values": ["%s", "%s"]}""" % (
-                self.name, traceback.format_exception_only(type(e), e)[-1],
-                self.name, traceback.format_exception_only(type(e), e)[-1]
-            )
+            msg = "Error evaluating '%s': %s" % (
+                self.name, traceback.format_exception_only(type(e), e)[-1])
             logging.exception(msg)
             raise self.gcode.error(msg)
     def run_gcode_from_command(self, context=None):
@@ -122,12 +115,8 @@ class GCodeMacro:
     def __init__(self, config):
         if len(config.get_name().split()) > 2:
             raise config.error(
-                    # "Name of section '%s' contains illegal whitespace"
-                    # % (config.get_name())
-                    """{"code":"key166", "msg": "Name of section '%s' contains illegal whitespace", "values": ["%s"]}""" % (
-                        config.get_name(), config.get_name(),
-                    )
-            )
+                    "Name of section '%s' contains illegal whitespace"
+                    % (config.get_name()))
         name = config.get_name().split()[1]
         self.alias = name.upper()
         self.printer = printer = config.get_printer()
@@ -190,8 +179,7 @@ class GCodeMacro:
         self.variables = v
     def cmd(self, gcmd):
         if self.in_script:
-            # raise gcmd.error("Macro %s called recursively" % (self.alias,))
-            raise gcmd.error("""{"code":"key172", "msg": "Macro %s called recursively", "values": ["%s"]}""" % (self.alias, self.alias))
+            raise gcmd.error("Macro %s called recursively" % (self.alias,))
         kwparams = dict(self.variables)
         kwparams.update(self.template.create_template_context())
         kwparams['params'] = gcmd.get_command_parameters()

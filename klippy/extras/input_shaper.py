@@ -33,8 +33,7 @@ class InputShaperParams:
         if shaper_type is None:
             shaper_type = gcmd.get('SHAPER_TYPE_' + axis, self.shaper_type)
         if shaper_type.lower() not in self.shapers:
-            raise gcmd.error("""{"code":"key24", "msg":"Unsupported shaper type: %s", "values": ["%s"]}""" % (
-                shaper_type, shaper_type))
+            raise gcmd.error('Unsupported shaper type: %s' % (shaper_type,))
         self.shaper_type = shaper_type.lower()
     def get_shaper(self):
         if not self.shaper_freq:

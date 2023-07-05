@@ -1,6 +1,6 @@
 # Basic LCD display support
 #
-# Copyright (C) 2018-2020  Kevin O'Connor <kevin@koconnor.net>
+# Copyright (C) 2018-2022  Kevin O'Connor <kevin@koconnor.net>
 # Copyright (C) 2018  Aleph Objects, Inc <marcio@alephobjects.com>
 # Copyright (C) 2018  Eric Callahan <arksine.code@gmail.com>
 #
@@ -35,20 +35,18 @@ class DisplayTemplate:
                 self.params[option] = ast.literal_eval(config.get(option))
             except ValueError as e:
                 raise config.error(
-                    # "Option '%s' in section '%s' is not a valid literal" % (
-                    #     option, config.get_name())
-                    """{"code":"key168", "msg": "Option '%s' in section '%s' is not a valid literal", "values": ["%s", "%s"]}""" % (
-                        option, config.get_name(), option, config.get_name()
-                    )
-                )
+                    "Option '%s' in section '%s' is not a valid literal" % (
+                        option, config.get_name()))
         gcode_macro = self.printer.load_object(config, 'gcode_macro')
         self.template = gcode_macro.load_template(config, 'text')
+    def get_params(self):
+        return self.params
     def render(self, context, **kwargs):
         params = dict(self.params)
         params.update(**kwargs)
         if len(params) != len(self.params):
             raise self.printer.command_error(
-                """{"code":"key219", "msg":"Invalid parameter to display_template %s", "values": ["%s"]}""" % (self.name, self.name))
+                "Invalid parameter to display_template %s" % (self.name,))
         context = dict(context)
         context.update(params)
         return self.template.render(context)
@@ -63,8 +61,8 @@ class DisplayGroup:
             try:
                 row, col = [int(v.strip()) for v in pos.split(',')]
             except:
-                raise config.error("""{"code":"key41", "msg":"Unable to parse 'position' in section '%s'", "values": ["%s"]}"""
-                                   % (c.get_name(), c.get_name()))
+                raise config.error("Unable to parse 'position' in section '%s'"
+                                   % (c.get_name(),))
             items.append((row, col, c.get_name()))
         # Load all templates and store sorted by display position
         configs_by_name = {c.get_name(): c for c in data_configs}
@@ -87,47 +85,20 @@ class DisplayGroup:
             display.draw_text(row, col, text.replace('\n', ''), eventtime)
         context.clear() # Remove circular references for better gc
 
-class PrinterLCD:
+# Global cache of DisplayTemplate, DisplayGroup, and glyphs
+class PrinterDisplayTemplate:
     def __init__(self, config):
         self.printer = config.get_printer()
-        self.reactor = self.printer.get_reactor()
-        # Load low-level lcd handler
-        self.lcd_chip = config.getchoice('lcd_type', LCD_chips)(config)
-        # Load menu and display_status
-        self.menu = None
-        name = config.get_name()
-        if name == 'display':
-            # only load menu for primary display
-            self.menu = menu.MenuManager(config, self)
-        self.printer.load_object(config, "display_status")
-        # Configurable display
         self.display_templates = {}
         self.display_data_groups = {}
+        self.display_glyphs = {}
         self.load_config(config)
-        dgroup = "_default_16x4"
-        if self.lcd_chip.get_dimensions()[0] == 20:
-            dgroup = "_default_20x4"
-        dgroup = config.get('display_group', dgroup)
-        self.show_data_group = self.display_data_groups.get(dgroup)
-        if self.show_data_group is None:
-            raise config.error("""{"code":"key220", "msg":"Unknown display_data group '%s'", "values": ["%s"]}""" % (dgroup,dgroup))
-        # Screen updating
-        self.printer.register_event_handler("klippy:ready", self.handle_ready)
-        self.screen_update_timer = self.reactor.register_timer(
-            self.screen_update_event)
-        self.redraw_request_pending = False
-        self.redraw_time = 0.
-        # Register g-code commands
-        gcode = self.printer.lookup_object("gcode")
-        gcode.register_mux_command('SET_DISPLAY_GROUP', 'DISPLAY', name,
-                                   self.cmd_SET_DISPLAY_GROUP,
-                                   desc=self.cmd_SET_DISPLAY_GROUP_help)
-        if name == 'display':
-            gcode.register_mux_command('SET_DISPLAY_GROUP', 'DISPLAY', None,
-                                       self.cmd_SET_DISPLAY_GROUP)
-    def get_dimensions(self):
-        return self.lcd_chip.get_dimensions()
-    # Configurable display
+    def get_display_templates(self):
+        return self.display_templates
+    def get_display_data_groups(self):
+        return self.display_data_groups
+    def get_display_glyphs(self):
+        return self.display_glyphs
     def _parse_glyph(self, config, glyph_name, data, width, height):
         glyph_data = []
         for line in data.split('\n'):
@@ -135,10 +106,10 @@ class PrinterLCD:
             if not line:
                 continue
             if len(line) != width or line.replace('0', '').replace('1', ''):
-                raise config.error("""{"code":"key221", "msg":"Invalid glyph line in %s", "values": ["%s"]}""" % (glyph_name, glyph_name))
+                raise config.error("Invalid glyph line in %s" % (glyph_name,))
             glyph_data.append(int(line, 2))
         if len(glyph_data) != height:
-            raise config.error("""{"code":"key222", "msg":"Glyph %s incorrect lines", "values": ["%s"]}""" % (glyph_name, glyph_name))
+            raise config.error("Glyph %s incorrect lines" % (glyph_name,))
         return glyph_data
     def load_config(self, config):
         # Load default display config file
@@ -166,15 +137,15 @@ class PrinterLCD:
         for c in dd_main + dd_def:
             name_parts = c.get_name().split()
             if len(name_parts) != 3:
-                raise config.error("""{"code":"key223", "msg":"Section name '%s' is not valid", "values": ["%s"]}"""
-                                   % (c.get_name(),c.get_name(),))
+                raise config.error("Section name '%s' is not valid"
+                                   % (c.get_name(),))
             groups.setdefault(name_parts[1], []).append(c)
         for group_name, data_configs in groups.items():
             dg = DisplayGroup(config, group_name, data_configs)
             self.display_data_groups[group_name] = dg
         # Load display glyphs
         dg_prefix = 'display_glyph '
-        icons = {}
+        self.display_glyphs = icons = {}
         dg_main = config.get_prefix_sections(dg_prefix)
         dg_main_names = {c.get_name(): 1 for c in dg_main}
         dg_def = [c for c in dconfig.get_prefix_sections(dg_prefix)
@@ -192,8 +163,56 @@ class PrinterLCD:
                 slot = dg.getint('hd44780_slot', minval=0, maxval=7)
                 idata = self._parse_glyph(config, glyph_name, data, 5, 8)
                 icons.setdefault(glyph_name, {})['icon5x8'] = (slot, idata)
-        self.lcd_chip.set_glyphs(icons)
-    # Initialization
+
+def lookup_display_templates(config):
+    printer = config.get_printer()
+    dt = printer.lookup_object("display_template", None)
+    if dt is None:
+        dt = PrinterDisplayTemplate(config)
+        printer.add_object("display_template", dt)
+    return dt
+
+class PrinterLCD:
+    def __init__(self, config):
+        self.printer = config.get_printer()
+        self.reactor = self.printer.get_reactor()
+        # Load low-level lcd handler
+        self.lcd_chip = config.getchoice('lcd_type', LCD_chips)(config)
+        # Load menu and display_status
+        self.menu = None
+        name = config.get_name()
+        if name == 'display':
+            # only load menu for primary display
+            self.menu = menu.MenuManager(config, self)
+        self.printer.load_object(config, "display_status")
+        # Configurable display
+        templates = lookup_display_templates(config)
+        self.display_templates = templates.get_display_templates()
+        self.display_data_groups = templates.get_display_data_groups()
+        self.lcd_chip.set_glyphs(templates.get_display_glyphs())
+        dgroup = "_default_16x4"
+        if self.lcd_chip.get_dimensions()[0] == 20:
+            dgroup = "_default_20x4"
+        dgroup = config.get('display_group', dgroup)
+        self.show_data_group = self.display_data_groups.get(dgroup)
+        if self.show_data_group is None:
+            raise config.error("Unknown display_data group '%s'" % (dgroup,))
+        # Screen updating
+        self.printer.register_event_handler("klippy:ready", self.handle_ready)
+        self.screen_update_timer = self.reactor.register_timer(
+            self.screen_update_event)
+        self.redraw_request_pending = False
+        self.redraw_time = 0.
+        # Register g-code commands
+        gcode = self.printer.lookup_object("gcode")
+        gcode.register_mux_command('SET_DISPLAY_GROUP', 'DISPLAY', name,
+                                   self.cmd_SET_DISPLAY_GROUP,
+                                   desc=self.cmd_SET_DISPLAY_GROUP_help)
+        if name == 'display':
+            gcode.register_mux_command('SET_DISPLAY_GROUP', 'DISPLAY', None,
+                                       self.cmd_SET_DISPLAY_GROUP)
+    def get_dimensions(self):
+        return self.lcd_chip.get_dimensions()
     def handle_ready(self):
         self.lcd_chip.init()
         # Start screen update timer
@@ -245,7 +264,7 @@ class PrinterLCD:
         group = gcmd.get('GROUP')
         new_dg = self.display_data_groups.get(group)
         if new_dg is None:
-            raise gcmd.error("""{"code":"key220", "msg":"Unknown display_data group '%s'", "values": ["%s"]}""" % (group,group))
+            raise gcmd.error("Unknown display_data group '%s'" % (group,))
         self.show_data_group = new_dg
 
 def load_config(config):

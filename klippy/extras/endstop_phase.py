@@ -54,7 +54,8 @@ class EndstopPhase:
         self.name = config.get_name().split()[1]
         # Obtain step_distance and microsteps from stepper config section
         sconfig = config.getsection(self.name)
-        self.step_dist = stepper.parse_step_distance(sconfig)
+        rotation_dist, steps_per_rotation = stepper.parse_step_distance(sconfig)
+        self.step_dist = rotation_dist / steps_per_rotation
         self.phases = sconfig.getint("microsteps", note_valid=False) * 4
         self.phase_calc = PhaseCalc(self.printer, self.name, self.phases)
         # Register event handlers
@@ -86,11 +87,8 @@ class EndstopPhase:
             self.endstop_phase_accuracy = int(
                 math.ceil(self.endstop_accuracy / self.step_dist))
         if self.endstop_phase_accuracy >= self.phases // 2:
-            raise config.error(
-                               """{"code":"key158", "msg": "Endstop for %s is not accurate enough for stepper phase adjustment", "values": ["%s"]}""" % (
-                                   self.name, self.name
-                               )
-                               )
+            raise config.error("Endstop for %s is not accurate enough for"
+                               " stepper phase adjustment" % (self.name,))
         if self.printer.get_start_args().get('debugoutput') is not None:
             self.endstop_phase_accuracy = self.phases
     def align_endstop(self, rail):

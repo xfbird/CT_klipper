@@ -3,7 +3,7 @@
 # Copyright (C) 2020  Dmitry Butyugin <dmbutyugin@google.com>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-import collections, importlib, logging, math, multiprocessing
+import collections, importlib, logging, math, multiprocessing, traceback
 shaper_defs = importlib.import_module('.shaper_defs', 'extras')
 
 MIN_FREQ = 5.
@@ -100,7 +100,7 @@ class ShaperCalibrate:
         # Return results
         is_err, res = parent_conn.recv()
         if is_err:
-            raise self.error("""{"code": "key312", "msg": "Error in remote calculation: %s", "values":["%s"]}""" % (res,res))
+            raise self.error("Error in remote calculation: %s" % (res,))
         calc_proc.join()
         parent_conn.close()
         return res
@@ -177,7 +177,7 @@ class ShaperCalibrate:
                 self.calc_freq_response, (data,))
         if calibration_data is None:
             raise self.error(
-                    """{"code": "key313", "msg": "Internal error processing accelerometer data %s", "values":["%s"]}""" % (data,data))
+                    "Internal error processing accelerometer data %s" % (data,))
         calibration_data.set_numpy(self.numpy)
         return calibration_data
 
@@ -357,4 +357,4 @@ class ShaperCalibrate:
                             csvfile.write(",%.3f" % (shaper.vals[i],))
                     csvfile.write("\n")
         except IOError as e:
-            raise self.error({"code": "key314", "msg": "Error writing to file '%s': %s", "values":["%s", "%s"]}, output, str(e), output, str(e))
+            raise self.error("Error writing to file '%s': %s", output, str(e))

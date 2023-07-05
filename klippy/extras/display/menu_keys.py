@@ -105,4 +105,4 @@ class MenuKeys:
         self.callback('down', eventtime)
 
     def kill_callback(self, eventtime):
-        self.printer.invoke_shutdown("""{"code":"key190", "msg": "Shutdown due to kill button!", "values": []}""")
+        self.printer.invoke_shutdown("Shutdown due to kill button!")

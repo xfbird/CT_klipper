@@ -13,9 +13,25 @@ class ManualProbe:
         self.gcode_move = self.printer.load_object(config, "gcode_move")
         self.gcode.register_command('MANUAL_PROBE', self.cmd_MANUAL_PROBE,
                                     desc=self.cmd_MANUAL_PROBE_help)
+        # Endstop value for cartesian printers with separate Z axis
         zconfig = config.getsection('stepper_z')
         self.z_position_endstop = zconfig.getfloat('position_endstop', None,
                                                    note_valid=False)
+        # Endstop values for linear delta printers with vertical A,B,C towers
+        a_tower_config = config.getsection('stepper_a')
+        self.a_position_endstop = a_tower_config.getfloat('position_endstop',
+                                                          None,
+                                                          note_valid=False)
+        b_tower_config = config.getsection('stepper_b')
+        self.b_position_endstop = b_tower_config.getfloat('position_endstop',
+                                                          None,
+                                                          note_valid=False)
+        c_tower_config = config.getsection('stepper_c')
+        self.c_position_endstop = c_tower_config.getfloat('position_endstop',
+                                                          None,
+                                                          note_valid=False)
+        # Conditionally register appropriate commands depending on printer
+        # Cartestian printers with separate Z Axis
         if self.z_position_endstop is not None:
             self.gcode.register_command(
                 'Z_ENDSTOP_CALIBRATE', self.cmd_Z_ENDSTOP_CALIBRATE,
@@ -24,9 +40,25 @@ class ManualProbe:
                 'Z_OFFSET_APPLY_ENDSTOP',
                 self.cmd_Z_OFFSET_APPLY_ENDSTOP,
                 desc=self.cmd_Z_OFFSET_APPLY_ENDSTOP_help)
+        # Linear delta printers with A,B,C towers
+        if 'delta' == config.getsection('printer').get('kinematics'):
+            self.gcode.register_command(
+                'Z_OFFSET_APPLY_ENDSTOP',
+                self.cmd_Z_OFFSET_APPLY_DELTA_ENDSTOPS,
+                desc=self.cmd_Z_OFFSET_APPLY_ENDSTOP_help)
+        self.reset_status()
     def manual_probe_finalize(self, kin_pos):
         if kin_pos is not None:
             self.gcode.respond_info("Z position is %.3f" % (kin_pos[2],))
+    def reset_status(self):
+        self.status = {
+            'is_active': False,
+            'z_position': None,
+            'z_position_lower': None,
+            'z_position_upper': None
+        }
+    def get_status(self, eventtime):
+        return self.status
     cmd_MANUAL_PROBE_help = "Start manual probe helper script"
     def cmd_MANUAL_PROBE(self, gcmd):
         ManualProbeHelper(self.printer, gcmd, self.manual_probe_finalize)
@@ -56,6 +88,29 @@ class ManualProbe:
                 "with the above and restart the printer." % (new_calibrate))
             configfile.set('stepper_z', 'position_endstop',
                 "%.3f" % (new_calibrate,))
+    def cmd_Z_OFFSET_APPLY_DELTA_ENDSTOPS(self,gcmd):
+        offset = self.gcode_move.get_status()['homing_origin'].z
+        configfile = self.printer.lookup_object('configfile')
+        if offset == 0:
+            self.gcode.respond_info("Nothing to do: Z Offset is 0")
+        else:
+            new_a_calibrate = self.a_position_endstop - offset
+            new_b_calibrate = self.b_position_endstop - offset
+            new_c_calibrate = self.c_position_endstop - offset
+            self.gcode.respond_info(
+                "stepper_a: position_endstop: %.3f\n"
+                "stepper_b: position_endstop: %.3f\n"
+                "stepper_c: position_endstop: %.3f\n"
+                "The SAVE_CONFIG command will update the printer config file\n"
+                "with the above and restart the printer." % (new_a_calibrate,
+                                                             new_b_calibrate,
+                                                             new_c_calibrate))
+            configfile.set('stepper_a', 'position_endstop',
+                "%.3f" % (new_a_calibrate,))
+            configfile.set('stepper_b', 'position_endstop',
+                "%.3f" % (new_b_calibrate,))
+            configfile.set('stepper_c', 'position_endstop',
+                "%.3f" % (new_c_calibrate,))
     cmd_Z_OFFSET_APPLY_ENDSTOP_help = "Adjust the z endstop_position"
 
 # Verify that a manual probe isn't already in progress
@@ -65,7 +120,7 @@ def verify_no_manual_probe(printer):
         gcode.register_command('ACCEPT', 'dummy')
     except printer.config_error as e:
         raise gcode.error(
-            """{"code":"key197", "msg": "Already in a manual Z probe. Use ABORT to abort it.", "values": []}""")
+            "Already in a manual Z probe. Use ABORT to abort it.")
     gcode.register_command('ACCEPT', None)
 
 Z_BOB_MINIMUM = 0.500
@@ -78,6 +133,7 @@ class ManualProbeHelper:
         self.finalize_callback = finalize_callback
         self.gcode = self.printer.lookup_object('gcode')
         self.toolhead = self.printer.lookup_object('toolhead')
+        self.manual_probe = self.printer.lookup_object('manual_probe')
         self.speed = gcmd.get_float("SPEED", 5.)
         self.past_positions = []
         self.last_toolhead_pos = self.last_kinematics_pos = None
@@ -123,72 +179,27 @@ class ManualProbeHelper:
         z_pos = kin_pos[2]
         if warn_no_change and z_pos == prev_pos:
             self.gcode.respond_info(
-                """{"code":"key256": "msg":"WARNING: No change in position (reached stepper resolution) ", "values":[]}""")
+                "WARNING: No change in position (reached stepper resolution)")
         # Find recent positions that were tested
         pp = self.past_positions
         next_pos = bisect.bisect_left(pp, z_pos)
         prev_pos = next_pos - 1
         if next_pos < len(pp) and pp[next_pos] == z_pos:
             next_pos += 1
+        prev_pos_val = next_pos_val = None
         prev_str = next_str = "??????"
         if prev_pos >= 0:
-            prev_str = "%.3f" % (pp[prev_pos],)
+            prev_pos_val = pp[prev_pos]
+            prev_str = "%.3f" % (prev_pos_val,)
         if next_pos < len(pp):
-            next_str = "%.3f" % (pp[next_pos],)
-        import json
-        z_offset = -1000
-        try:
-            path = "/mnt/UDISK/printer_config/printer.cfg"
-            import os
-            import yaml
-            # If it is in multi machine control mode, select the configuration file according to the currently selected USB port
-            if os.path.exists("/etc/init.d/klipper_service.2"):
-                try:
-                    with open("/mnt/UDISK/.crealityprint/multiprinter.yaml", 'r') as f:
-                        multi_printer_info = yaml.load(f.read(), Loader=yaml.Loader)
-                except:
-                    multi_printer_info = {}
-                current_printer = multi_printer_info.get("current_printer", {
-                    "printer_id": 1,
-                    "serial": "/dev/serial/by-id/usb_serial_1",
-                    "moonraker_port": 7125
-                })
-                str_printer_id = str(current_printer.get("printer_id"))
-                if str_printer_id == "1":
-                    pass
-                else:
-                    path = "/mnt/UDISK/printer_config" + str_printer_id + "/printer.cfg"
-
-            with open(path, "r") as f:
-                ret = f.readlines()
-                for obj in ret:
-                    if obj.startswith("#*# z_offset"):
-                        obj = obj.strip("\n")
-                        z_offset = float(obj.split(" ")[-1])
-        except Exception as err:
-            logging.error(err)
-        if z_offset != -1000:
-            if z_offset - z_pos < 0.0:
-                with open("/mnt/UDISK/.crealityprint/z_offset.json", "w+") as f:
-                    msg = {"z_offset_is_ok": False}
-                    f.write(json.dumps(msg))
-                    f.flush()
-            else:
-                with open("/mnt/UDISK/.crealityprint/z_offset.json", "w+") as f:
-                    msg = {"z_offset_is_ok": True}
-                    f.write(json.dumps(msg))
-                    f.flush()
-        else:
-            if 0 < z_pos:
-                with open("/mnt/UDISK/.crealityprint/z_offset.json", "w+") as f:
-                    msg = {"z_offset_is_ok": False}
-                    f.write(json.dumps(msg))
-                    f.flush()
-            else:
-                with open("/mnt/UDISK/.crealityprint/z_offset.json", "w+") as f:
-                    msg = {"z_offset_is_ok": True}
-                    f.write(json.dumps(msg))
-                    f.flush()
+            next_pos_val = pp[next_pos]
+            next_str = "%.3f" % (next_pos_val,)
+        self.manual_probe.status = {
+            'is_active': True,
+            'z_position': z_pos,
+            'z_position_lower': prev_pos_val,
+            'z_position_upper': next_pos_val,
+        }
         # Find recent positions
         self.gcode.respond_info("Z position: %s --> %.3f <-- %s"
                                 % (prev_str, z_pos, next_str))
@@ -197,8 +208,9 @@ class ManualProbeHelper:
         pos = self.toolhead.get_position()
         start_pos = self.start_position
         if pos[:2] != start_pos[:2] or pos[2] >= start_pos[2]:
-            gcmd.error(
-                """{"code":"key257": "msg":"Manual probe failed! Use TESTZ commands to position the \nnozzle prior to running ACCEPT.", "values":[]}""")
+            gcmd.respond_info(
+                "Manual probe failed! Use TESTZ commands to position the\n"
+                "nozzle prior to running ACCEPT.")
             self.finalize(False)
             return
         self.finalize(True)
@@ -236,6 +248,7 @@ class ManualProbeHelper:
         self.move_z(next_z_pos)
         self.report_z_status(next_z_pos != z_pos, z_pos)
     def finalize(self, success):
+        self.manual_probe.reset_status()
         self.gcode.register_command('ACCEPT', None)
         self.gcode.register_command('NEXT', None)
         self.gcode.register_command('ABORT', None)

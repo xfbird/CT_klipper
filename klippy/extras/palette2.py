@@ -49,7 +49,8 @@ class Palette2:
                 config, "virtual_sdcard")
         except config.error:
             raise self.printer.config_error(
-                """{"code":"key199", "msg": "Palette 2 requires [virtual_sdcard] to work, please add it to your config!", "values": []}""")
+                "Palette 2 requires [virtual_sdcard] to work,"
+                " please add it to your config!")
         try:
             self.pause_resume = self.printer.load_object(
                 config, "pause_resume")
@@ -76,7 +77,7 @@ class Palette2:
         self.serial = None
         self.serial_port = config.get("serial")
         if not self.serial_port:
-            raise config.error("""{"code":"key199", "msg": "Invalid serial port specific for Palette 2", "values": []}""")
+            raise config.error("Invalid serial port specific for Palette 2")
         self.baud = config.getint("baud", default=115200)
         self.feedrate_splice = config.getfloat(
             "feedrate_splice", default=0.8, minval=0., maxval=1.)
@@ -141,7 +142,7 @@ class Palette2:
     def cmd_Connect(self, gcmd):
         if self.serial:
             gcmd.respond_info(
-                """{"code":"key200", "msg": "Palette 2 serial port is already active, disconnect first", "values": []}""")
+                "Palette 2 serial port is already active, disconnect first")
             return
 
         self.signal_disconnect = False
@@ -151,7 +152,7 @@ class Palette2:
             self.serial = serial.Serial(
                 self.serial_port, self.baud, timeout=0, write_timeout=0)
         except SerialException:
-            gcmd.respond_info("""{"code":"key201", "msg": "Unable to connect to the Palette 2", "values": []}""")
+            gcmd.respond_info("Unable to connect to the Palette 2")
             return
 
         with self.write_queue.mutex:
@@ -173,8 +174,8 @@ class Palette2:
 
     cmd_Disconnect_Help = ("Disconnect from the Palette 2")
 
-    def cmd_Disconnect(self, gmcd=None):
-        self.gcode.respond_info("""{"code":"key202", "msg": "Disconnecting from Palette 2", "values": []}""")
+    def cmd_Disconnect(self, gcmd=None):
+        self.gcode.respond_info("Disconnecting from Palette 2")
         if self.serial:
             self.serial.close()
             self.serial = None
@@ -208,7 +209,7 @@ class Palette2:
         if self._check_P2(gcmd):
             if not self.is_loading:
                 gcmd.respond_info(
-                    """{"code":"key203", "msg": "Cannot auto load when the Palette 2 is not ready", "values": []}""")
+                    "Cannot auto load when the Palette 2 is not ready")
                 return
             self.p2cmd_O102(params=None)
 
@@ -220,15 +221,15 @@ class Palette2:
     def _wait_for_heartbeat(self):
         startTs = self.reactor.monotonic()
         currTs = startTs
-        while self.heartbeat is None and self.heartbeat < (
-                currTs - SETUP_TIMEOUT) and startTs > (
-                currTs - SETUP_TIMEOUT):
+        while self.heartbeat is None or (self.heartbeat < (
+            currTs - SETUP_TIMEOUT) and startTs > (
+                currTs - SETUP_TIMEOUT)):
             currTs = self.reactor.pause(currTs + 1.)
 
         if self.heartbeat < (currTs - SETUP_TIMEOUT):
             self.signal_disconnect = True
             raise self.printer.command_error(
-                """{"code":"key204", "msg": "No response from Palette 2", "values": []}""")
+                "No response from Palette 2")
 
     cmd_O1_help = (
         "Initialize the print, and check connection with the Palette 2")
@@ -305,11 +306,11 @@ class Palette2:
             param_distance = gcmd.get_commandline()[8:]
         except IndexError:
             gcmd.respond_info(
-                """{"code":"key206", "msg": "Incorrect number of arguments for splice command" "values": []}""")
+                "Incorrect number of arguments for splice command")
         try:
             self.omega_splices.append((int(param_drive), param_distance))
         except ValueError:
-            gcmd.respond_info("""{"code":"key207", "msg": "Incorrectly formatted splice command" "values": []}""")
+            gcmd.respond_info("Incorrectly formatted splice command")
         logging.debug("Omega splice command drive %s distance %s" %
                       (param_drive, param_distance))
 
@@ -400,13 +401,14 @@ class Palette2:
             try:
                 fw = params[0][1:]
                 logging.info(
-                    "Palette 2 firmware version %s detected" % os.fwalk)
+                    "Palette 2 firmware version %s detected" % fw)
             except (TypeError, IndexError):
                 logging.error("Unable to parse firmware version")
 
             if fw < "9.0.9":
                 raise self.printer.command_error(
-                    """{"code":"key208", "msg": "Palette 2 firmware version is too old, update to at least 9.0.9" "values": []}""")
+                    "Palette 2 firmware version is too old, "
+                    "update to at least 9.0.9")
         else:
             self.files = [
                 file for (
@@ -493,7 +495,7 @@ class Palette2:
         if not toolhead.get_extruder().get_heater().can_extrude:
             self.write_queue.put(COMMAND_SMART_LOAD_STOP)
             self.gcode.respond_info(
-                """{"code":"key210", "msg": "Unable to auto load filament, extruder is below minimum temp" "values": []}""")
+                "Unable to auto load filament, extruder is below minimum temp")
             return
 
         if self.smart_load_timer is None:
@@ -542,13 +544,15 @@ class Palette2:
                 self.cmd_Disconnect()
                 return self.reactor.NEVER
             if len(raw_bytes):
-                text_buffer = self.read_buffer + str(raw_bytes.decode())
+                new_buffer = str(raw_bytes.decode(encoding='UTF-8',
+                                                  errors='ignore'))
+                text_buffer = self.read_buffer + new_buffer
                 while True:
                     i = text_buffer.find("\n")
                     if i >= 0:
-                        line = text_buffer[0:i+1]
+                        line = text_buffer[0:i + 1]
                         self.read_queue.put(line.strip())
-                        text_buffer = text_buffer[i+1:]
+                        text_buffer = text_buffer[i + 1:]
                     else:
                         break
                 self.read_buffer = text_buffer
@@ -564,7 +568,7 @@ class Palette2:
 
             heartbeat_strings = [COMMAND_HEARTBEAT, "Connection Okay"]
             if not any(x in text_line for x in heartbeat_strings):
-                logging.debug("%0.3f P2 -> : %s" %(eventtime, text_line))
+                logging.debug("%0.3f P2 -> : %s" % (eventtime, text_line))
 
             # Received a heartbeat from the device
             if text_line == COMMAND_HEARTBEAT:
@@ -579,7 +583,7 @@ class Palette2:
         self.write_queue.put(COMMAND_HEARTBEAT)
         eventtime = self.reactor.pause(eventtime + 5)
         if self.heartbeat and self.heartbeat < (
-                eventtime - HEARTBEAT_TIMEOUT):
+            eventtime - HEARTBEAT_TIMEOUT):
             logging.error(
                 "P2 has not responded to heartbeat")
             if not self.is_printing or self.is_setup_complete:
@@ -608,6 +612,7 @@ class Palette2:
                     logging.error("Unable to communicate with the Palette 2")
                     self.signal_disconnect = True
                     return self.reactor.NEVER
+                return eventtime + SERIAL_TIMER
         return eventtime + SERIAL_TIMER
 
     def _run_Smart_Load(self, eventtime):
@@ -619,7 +624,7 @@ class Palette2:
             idle_time = est_print_time - print_time
             if not lookahead_empty or idle_time < 0.5:
                 return eventtime + \
-                    max(0., min(1., print_time - est_print_time))
+                       max(0., min(1., print_time - est_print_time))
 
             extrude = abs(self.remaining_load_length)
             extrude = min(50, extrude / 2)
@@ -643,6 +648,7 @@ class Palette2:
         if self.omega_pings:
             status["ping"] = self.omega_pings[-1]
         return status
+
 
 def load_config(config):
     return Palette2(config)

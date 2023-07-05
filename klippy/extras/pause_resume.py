@@ -6,6 +6,7 @@
 
 class PauseResume:
     def __init__(self, config):
+        self.config = config
         self.printer = config.get_printer()
         self.gcode = self.printer.lookup_object('gcode')
         self.recover_velocity = config.getfloat('recover_velocity', 50.)
@@ -32,20 +33,92 @@ class PauseResume:
                                    self._handle_pause_request)
         webhooks.register_endpoint("pause_resume/resume",
                                    self._handle_resume_request)
+        webhooks.register_endpoint("extruder_rotation_distance",
+                                   self._handle_extruder_rotation_distance_request)
+        webhooks.register_endpoint("extruder_gear_ratio",
+                                   self._handle_extruder_gear_ratio_request)
+        webhooks.register_endpoint("set_extruder_rotation_distance",
+                                   self._set_extruder_rotation_distance_request)
+        webhooks.register_endpoint("set_extruder_gear_ratio",
+                                   self._set_extruder_gear_ratio_request)
+
+    def _handle_extruder_rotation_distance_request(self, web_request):
+        # self.autosave.fileconfig.set(section, option, svalue)
+        rotation_dist = 32.473
+        if self.config.has_section("extruder"):
+            rotation_dist = self.config.getsection("extruder").getfloat('rotation_distance', above=0., note_valid=False)
+        result = {"code": 200, "rotation_distance": rotation_dist}
+        web_request.send(result)
+        return result
+
+    def _handle_extruder_gear_ratio_request(self, web_request):
+        gear_ratio = [1.0, 1.0]
+        try:
+            if self.config.has_section("extruder"):
+                gear_ratio = self.config.getsection("extruder").getlists('gear_ratio', (1.0, 1.0), seps=(':', ','),
+                                                                         count=2, parser=float, note_valid=False)
+                if isinstance(gear_ratio[0], tuple):
+                    gear_ratio = gear_ratio[0]
+        except Exception as err:
+            import logging
+            logging.error(err)
+        result = {"code": 200, "gear_ratio": {"Molecule": gear_ratio[0], "Denominator": gear_ratio[1]}}
+        web_request.send(result)
+        return result
+
+    def _set_extruder_rotation_distance_request(self, web_request):
+        rotation_distance = web_request.get("rotation_distance", 32.473)
+        if self.config.has_section("extruder"):
+            self.printer.lookup_object('gcode').run_script(
+                "SET_ROTATION_DISTANCE ROTATION_DISTANCE=%s" % rotation_distance)
+        result = {"code": 200, "rotation_distance": float(rotation_distance)}
+        web_request.send(result)
+        import threading
+        t = threading.Thread(target=self.request_restart)
+        t.start()
+        return result
+
+    def _set_extruder_gear_ratio_request(self, web_request):
+        Molecule = web_request.get("Molecule", 1.0)
+        Denominator = web_request.get("Denominator", 1.0)
+        gear_ratio = "%s:%s" % (Molecule, Denominator)
+        if self.config.has_section("extruder"):
+            self.printer.lookup_object('gcode').run_script("SET_GEAR_RATIO GEAR_RATIO=%s" % gear_ratio)
+        result = {"code": 200, "Molecule": float(Molecule), "Denominator": float(Denominator)}
+        web_request.send(result)
+        import threading
+        t = threading.Thread(target=self.request_restart)
+        t.start()
+        return result
+
+    def request_restart(self):
+        import time
+        time.sleep(1)
+        gcode = self.printer.lookup_object('gcode')
+        gcode.request_restart('restart')
+
     def handle_connect(self):
         self.v_sd = self.printer.lookup_object('virtual_sdcard', None)
+
     def _handle_cancel_request(self, web_request):
         self.gcode.run_script("CANCEL_PRINT")
+
     def _handle_pause_request(self, web_request):
+        self.v_sd.power_loss_pause_flag = True
         self.gcode.run_script("PAUSE")
+        self.v_sd.power_loss_pause_flag = False
+
     def _handle_resume_request(self, web_request):
         self.gcode.run_script("RESUME")
+
     def get_status(self, eventtime):
         return {
             'is_paused': self.is_paused
         }
+
     def is_sd_active(self):
         return self.v_sd is not None and self.v_sd.is_active()
+
     def send_pause_command(self):
         # This sends the appropriate pause command from an event.  Note
         # the difference between pause_command_sent and is_paused, the
@@ -59,13 +132,25 @@ class PauseResume:
                 self.sd_paused = False
                 self.gcode.respond_info("action:paused")
             self.pause_command_sent = True
+            self.printer.lookup_object('toolhead').move_queue.flush()
+
     cmd_PAUSE_help = ("Pauses the current print")
+
     def cmd_PAUSE(self, gcmd):
+        import os, time
+        reactor = self.printer.get_reactor()
+        count = 0
+        while True:
+            count += 1
+            if not self.v_sd.toolhead_moved or count > 500:
+                break
+            time.sleep(0.01)
+            reactor.pause(reactor.monotonic() + .01)
         if self.is_paused:
             gcmd.respond_info("""{"code":"key211", "msg": "Print already paused", "values": []}""")
             return
         self.send_pause_command()
-        self.gcode.run_script_from_command("SAVE_GCODE_STATE STATE=PAUSE_STATE")
+        self.gcode.run_script_from_command("SAVE_GCODE_STATE NAME=PAUSE_STATE")
         self.is_paused = True
     def send_resume_command(self):
         if self.sd_paused:
@@ -76,6 +161,7 @@ class PauseResume:
         else:
             self.gcode.respond_info("action:resumed")
         self.pause_command_sent = False
+        self.printer.lookup_object('toolhead').move_queue.flush()
     cmd_RESUME_help = ("Resumes the print from a pause")
     def cmd_RESUME(self, gcmd):
         if not self.is_paused:
@@ -83,11 +169,13 @@ class PauseResume:
             return
         velocity = gcmd.get_float('VELOCITY', self.recover_velocity)
         self.gcode.run_script_from_command(
-            "RESTORE_GCODE_STATE STATE=PAUSE_STATE MOVE=1 MOVE_SPEED=%.4f"
+            "RESTORE_GCODE_STATE NAME=PAUSE_STATE MOVE=1 MOVE_SPEED=%.4f"
             % (velocity))
         self.send_resume_command()
         self.is_paused = False
+
     cmd_M600_help = ("M600 Pauses the current print")
+
     def cmd_M600(self, gcmd):
         x = gcmd.get_float("X", 0.)
         y = gcmd.get_float("Y", 0.)
@@ -98,19 +186,21 @@ class PauseResume:
             return
         self.send_pause_command()
         self.gcode.run_script_from_command("SAVE_GCODE_STATE NAME=M600_state\n")
-        self.gcode.run_script_from_command("SAVE_GCODE_STATE STATE=PAUSE_STATE")
+        self.gcode.run_script_from_command("SAVE_GCODE_STATE NAME=PAUSE_STATE")
         self.gcode.run_script_from_command(
-                                            "G91\n"
-                                            "G1 E-5 F4000\n"
-                                            "G1 Z%s\n"
-                                            "G90\n"
-                                            "G1 X%s Y%s F3000\n"
-                                            "G0 E10 F6000\n"
-                                            "G0 E%s F6000\n"
-                                            "G92 E0" % (z, x, y, e))
+            "G91\n"
+            "G1 E-5 F4000\n"
+            "G1 Z%s\n"
+            "G90\n"
+            "G1 X%s Y%s F3000\n"
+            "G0 E10 F6000\n"
+            "G0 E%s F6000\n"
+            "G92 E0" % (z, x, y, e))
         self.is_paused = True
+
     cmd_CLEAR_PAUSE_help = (
         "Clears the current paused state without resuming the print")
+
     def cmd_CLEAR_PAUSE(self, gcmd):
         self.is_paused = self.pause_command_sent = False
     cmd_CANCEL_PRINT_help = ("Cancel the current print")
@@ -121,6 +211,8 @@ class PauseResume:
             gcmd.respond_info("action:cancel")
         self.cmd_CLEAR_PAUSE(gcmd)
         self.v_sd.cancel_print_state = False
+        self.v_sd.pause_flag = 1
+
 
 def load_config(config):
     return PauseResume(config)

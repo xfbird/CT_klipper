@@ -22,7 +22,7 @@ class MenuElement(object):
     def __init__(self, manager, config, **kwargs):
         if type(self) is MenuElement:
             raise error(
-                """{"code":"key104", "msg": "Abstract MenuElement cannot be instantiated directly", "values": []}""")
+                'Abstract MenuElement cannot be instantiated directly')
         self._manager = manager
         self._cursor = '>'
         # set class defaults and attributes from arguments
@@ -237,7 +237,7 @@ class MenuContainer(MenuElement):
     def __init__(self, manager, config, **kwargs):
         if type(self) is MenuContainer:
             raise error(
-                """{"code":"key225", "msg":"Abstract MenuContainer cannot be instantiated directly'", "values": []}""")
+                'Abstract MenuContainer cannot be instantiated directly')
         super(MenuContainer, self).__init__(manager, config, **kwargs)
         self._populate_cb = kwargs.get('populate', None)
         self._cursor = '>'
@@ -317,9 +317,7 @@ class MenuContainer(MenuElement):
         item, name = self._lookup_item(s)
         if item is not None:
             if not self.is_accepted(item):
-                raise error("""{"code":"key226", "msg":"Menu item '%s'is not accepted!", "values": ["%s"]}""" % (str(type(item)),
-                                                                                                                str(type(item))
-                                                                                                                ))
+                raise error("Menu item '%s'is not accepted!" % str(type(item)))
             if isinstance(item, (MenuElement)):
                 item.init()
             if isinstance(item, (MenuContainer)):
@@ -797,7 +795,7 @@ class MenuManager:
 
     def stack_push(self, container):
         if not isinstance(container, MenuContainer):
-            raise error("""{"code":"key227", "msg":"Wrong type, expected MenuContainer", "values": []}""")
+            raise error("Wrong type, expected MenuContainer")
         container.populate()
         top = self.stack_peek()
         if top is not None:
@@ -815,11 +813,11 @@ class MenuManager:
         if self.stack_size() > 0:
             container = self.menustack.pop()
             if not isinstance(container, MenuContainer):
-                raise error("""{"code":"key227", "msg":"Wrong type, expected MenuContainer", "values": []}""")
+                raise error("Wrong type, expected MenuContainer")
             top = self.stack_peek()
             if top is not None:
                 if not isinstance(container, MenuContainer):
-                    raise error("""{"code":"key227", "msg":"Wrong type, expected MenuContainer", "values": []}""")
+                    raise error("Wrong type, expected MenuContainer")
                 if not top.is_editing() and update is True:
                     top.update_items()
                     top.init_selection()
@@ -962,8 +960,8 @@ class MenuManager:
 
     def menuitem_from(self, type, **kwargs):
         if type not in menu_items:
-            raise error("""{"code":"key228", "msg":"Choice '%s' for option '%s' is not a valid choice", "values": ["%s", "%s"]}""" % (
-                type, menu_items, type, menu_items))
+            raise error("Choice '%s' for option '%s'"
+                        " is not a valid choice" % (type, menu_items))
         return menu_items[type](self, None, **kwargs)
 
     def add_menuitem(self, name, item):
@@ -991,7 +989,7 @@ class MenuManager:
             return self.menuitems[name]
         if default is sentinel:
             raise self.printer.config_error(
-                """{"code":"key229", "msg":"Unknown menuitem '%s'", "values": ["%s"]}""" % (name, name))
+                "Unknown menuitem '%s'" % (name,))
         return default
 
     def lookup_children(self, ns):
@@ -1015,8 +1013,8 @@ class MenuManager:
         for cfg in config.get_prefix_sections('menu '):
             type = cfg.get('type')
             if type not in menu_items:
-                raise error("""{"code":"key228", "msg":"Choice '%s' for option '%s' is not a valid choice", "values": ["%s", "%s"]}""" % (
-                type, menu_items, type, menu_items))
+                raise error("Choice '%s' for option '%s'"
+                            " is not a valid choice" % (type, menu_items))
             item = menu_items[type](self, cfg)
             self.add_menuitem(item.get_ns(), item)
 

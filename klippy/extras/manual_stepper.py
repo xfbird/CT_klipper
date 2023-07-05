@@ -75,7 +75,7 @@ class ManualStepper:
     def do_homing_move(self, movepos, speed, accel, triggered, check_trigger):
         if not self.can_home:
             raise self.printer.command_error(
-                """{"code":"key198", "msg": "No endstop for this manual stepper", "values": []}""")
+                "No endstop for this manual stepper")
         self.homing_accel = accel
         pos = [movepos, 0., 0., 0.]
         endstops = self.rail.get_endstops()

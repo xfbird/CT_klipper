@@ -49,7 +49,7 @@ class WebRequest:
         self.method = base_request.get('method')
         self.params = base_request.get('params', {})
         if type(self.method) != str or type(self.params) != dict:
-            raise ValueError("""{"code":"key178", "msg": "Invalid request type", "values": []}""")
+            raise ValueError("Invalid request type")
         self.response = None
         self.is_error = False
 
@@ -59,10 +59,10 @@ class WebRequest:
     def get(self, item, default=Sentinel, types=None):
         value = self.params.get(item, default)
         if value is Sentinel:
-            raise WebRequestError("""{"code":"key179", "msg": "Missing Argument [%s]", "values": ["%s"]}""" % (item, item))
+            raise WebRequestError("Missing Argument [%s]" % (item,))
         if (types is not None and type(value) not in types
             and item in self.params):
-            raise WebRequestError("""{"code":"key180", "msg": "Invalid Argument Type [%s]", "values": ["%s"]}""" % (item, item))
+            raise WebRequestError("Invalid Argument Type [%s]" % (item,))
         return value
 
     def get_str(self, item, default=Sentinel):
@@ -162,6 +162,16 @@ class ServerSocket:
     def pop_client(self, client_id):
         self.clients.pop(client_id, None)
 
+    def stats(self, eventtime):
+        # Called once per second - check for idle clients
+        for client in list(self.clients.values()):
+            if client.is_blocking:
+                client.blocking_count -= 1
+                if client.blocking_count < 0:
+                    logging.info("Closing unresponsive client %s", client.uid)
+                    client.close()
+        return False, ""
+
 class ClientConnection:
     def __init__(self, server, sock):
         self.printer = server.printer
@@ -171,9 +181,10 @@ class ClientConnection:
         self.uid = id(self)
         self.sock = sock
         self.fd_handle = self.reactor.register_fd(
-            self.sock.fileno(), self.process_received)
+            self.sock.fileno(), self.process_received, self._do_send)
         self.partial_data = self.send_buffer = b""
-        self.is_sending_data = False
+        self.is_blocking = False
+        self.blocking_count = 0
         self.set_client_info("?", "New connection")
         self.request_log = collections.deque([], REQUEST_LOG_SIZE)
 
@@ -259,33 +270,29 @@ class ClientConnection:
     def send(self, data):
         jmsg = json.dumps(data, separators=(',', ':'))
         self.send_buffer += jmsg.encode() + b"\x03"
-        if not self.is_sending_data:
-            self.is_sending_data = True
-            self.reactor.register_callback(self._do_send)
+        if not self.is_blocking:
+            self._do_send()
 
-    def _do_send(self, eventtime):
-        retries = 10
-        while self.send_buffer:
-            try:
-                sent = self.sock.send(self.send_buffer)
-            except socket.error as e:
-                if e.errno == errno.EBADF or e.errno == errno.EPIPE \
-                        or not retries:
-                    sent = 0
-                else:
-                    retries -= 1
-                    waketime = self.reactor.monotonic() + .001
-                    self.reactor.pause(waketime)
-                    continue
-            retries = 10
-            if sent > 0:
-                self.send_buffer = self.send_buffer[sent:]
-            else:
-                logging.info(
-                    "webhooks: Error sending server data,  closing socket")
+    def _do_send(self, eventtime=None):
+        if self.fd_handle is None:
+            return
+        try:
+            sent = self.sock.send(self.send_buffer)
+        except socket.error as e:
+            if e.errno not in [errno.EAGAIN, errno.EWOULDBLOCK]:
+                logging.info("webhooks: socket write error %d" % (self.uid,))
                 self.close()
-                break
-        self.is_sending_data = False
+                return
+            sent = 0
+        if sent < len(self.send_buffer):
+            if not self.is_blocking:
+                self.reactor.set_fd_wake(self.fd_handle, False, True)
+                self.is_blocking = True
+                self.blocking_count = 5
+        elif self.is_blocking:
+            self.reactor.set_fd_wake(self.fd_handle, True, False)
+            self.is_blocking = False
+        self.send_buffer = self.send_buffer[sent:]
 
 class WebHooks:
     def __init__(self, printer):
@@ -312,12 +319,12 @@ class WebHooks:
         prev_key, prev_values = prev
         if prev_key != key:
             raise self.printer.config_error(
-                """{"code":"key182", "msg": "mux endpoint %s %s %s may have only one key (%s)", "values": ["%s", "%s", "%s", "%s"]}"""
-                % (path, key, value, prev_key, path, key, value, prev_key))
+                "mux endpoint %s %s %s may have only one key (%s)"
+                % (path, key, value, prev_key))
         if value in prev_values:
             raise self.printer.config_error(
-                """{"code":"key182", "msg": "mux endpoint %s %s %s already registered (%s)", "values": ["%s", "%s", "%s", "%s"]}"""
-                % (path, key, value, prev_values, path, key, value, prev_values))
+                "mux endpoint %s %s %s already registered (%s)"
+                % (path, key, value, prev_values))
         prev_values[value] = callback
 
     def _handle_mux(self, web_request):
@@ -327,8 +334,8 @@ class WebHooks:
         else:
             key_param = web_request.get(key)
         if key_param not in values:
-            raise web_request.error("""{"code":"key183", "msg": "The value '%s' is not valid for %s", "values": ["%s", "%s"]}"""
-                                    % (key_param, key, key_param, key))
+            raise web_request.error("The value '%s' is not valid for %s"
+                                    % (key_param, key))
         values[key_param](web_request)
 
     def _handle_list_endpoints(self, web_request):
@@ -366,7 +373,7 @@ class WebHooks:
     def get_callback(self, path):
         cb = self._endpoints.get(path, None)
         if cb is None:
-            msg = """{"code":"key184", "msg": "webhooks: No registered callback for path '%s'", "values": ["%s"]}""" % (path, path)
+            msg = "webhooks: No registered callback for path '%s'" % (path)
             logging.info(msg)
             raise WebRequestError(msg)
         return cb
@@ -375,10 +382,13 @@ class WebHooks:
         state_message, state = self.printer.get_state_message()
         return {'state': state, 'state_message': state_message}
 
+    def stats(self, eventtime):
+        return self.sconn.stats(eventtime)
+
     def call_remote_method(self, method, **kwargs):
         if method not in self._remote_methods:
             raise self.printer.command_error(
-                """{"code":"key185", "msg": "Remote method '%s' not registered", "values": ["%s"]}""" % (method, method))
+                "Remote method '%s' not registered" % (method))
         conn_map = self._remote_methods[method]
         valid_conns = {}
         for conn, template in conn_map.items():
@@ -390,7 +400,7 @@ class WebHooks:
         if not valid_conns:
             del self._remote_methods[method]
             raise self.printer.command_error(
-                """{"code":"key186", "msg": "No active connections for method '%s'", "values": ["%s"]}""" % (method, method))
+                "No active connections for method '%s'" % (method))
         self._remote_methods[method] = valid_conns
 
 class GCodeHelper:
@@ -502,11 +512,11 @@ class QueryStatusHelper:
         # Validate subscription format
         for k, v in objects.items():
             if type(k) != str or (v is not None and type(v) != list):
-                raise web_request.error("""{"code":"key187", "msg": "Invalid argument", "values": []}""")
+                raise web_request.error("Invalid argument")
             if v is not None:
                 for ri in v:
                     if type(ri) != str:
-                        raise web_request.error("""{"code":"key187", "msg": "Invalid argument", "values": []}""")
+                        raise web_request.error("Invalid argument")
         # Add to pending queries
         cconn = web_request.get_client_connection()
         template = web_request.get_dict('response_template', {})

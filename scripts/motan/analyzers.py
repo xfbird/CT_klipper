@@ -119,7 +119,7 @@ class GenKinematicPosition:
         if kin not in ['cartesian', 'corexy']:
             raise amanager.error("Unsupported kinematics '%s'" % (kin,))
         if stepper not in ['stepper_x', 'stepper_y', 'stepper_z']:
-            raise amanager.error("Unknown stepper '%s'" % (stepper,))
+            raise amanager.error("""{"code":"key31", "msg":"Unknown stepper %s", "values": ["%s"]}""" % (stepper, stepper))
         if kin == 'corexy' and stepper in ['stepper_x', 'stepper_y']:
             self.source1 = 'trapq(toolhead,x)'
             self.source2 = 'trapq(toolhead,y)'
@@ -264,7 +264,7 @@ class AnalyzerManager:
         if hdl is None:
             hdl = self.gen_datasets.get(dataset)
             if hdl is None:
-                raise error("Unknown dataset '%s'" % (dataset,))
+                raise self.error("Unknown dataset '%s'" % (dataset,))
         return hdl.get_label()
     def generate_datasets(self):
         # Generate raw data

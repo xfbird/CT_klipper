@@ -44,37 +44,46 @@ class ConfigWrapper:
             self.access_tracking[(self.section.lower(), option.lower())] = v
         if minval is not None and v < minval:
             if option == "z_offset" and self.section == "bltouch":
-                raise error("""{"code":"key281", "msg":"Error on 'z_offset': 'touch' must have minimum of %s", "values":["%s"]}""" % (
-                    minval, minval
-                ))
+                raise error(
+                    """{"code":"key281", "msg":"Error on 'z_offset': 'touch' must have minimum of %s", "values":["%s"]}""" % (
+                        minval, minval
+                    ))
             else:
-                raise error("""{"code":"key252", "msg":"Error on '%s': %s must have minimum of %s", "values":["%s","%s","%s"]}"""
-                            % (option, self.section, minval, option, self.section, minval))
+                raise error(
+                    """{"code":"key252", "msg":"Error on '%s': %s must have minimum of %s", "values":["%s","%s","%s"]}"""
+                    % (option, self.section, minval, option, self.section, minval))
         if maxval is not None and v > maxval:
-            raise error("""{"code":"key253", "msg":"Error on '%s': %s must have maximumof %s", "values":["%s","%s","%s"]}"""
-                        % (option, self.section, maxval, option, self.section, maxval))
+            raise error(
+                """{"code":"key253", "msg":"Error on '%s': %s must have maximumof %s", "values":["%s","%s","%s"]}"""
+                % (option, self.section, maxval, option, self.section, maxval))
         if above is not None and v <= above:
             raise error("""{"code":"key254", "msg":"Error on '%s': %s must be above %s", "values":["%s","%s","%s"]}"""
                         % (option, self.section, above, option, self.section, above))
         if below is not None and v >= below:
-            raise self.error("""{"code":"key255", "msg":"Error on '%s': %s must be below %s", "values":["%s","%s","%s"]}"""
-                             % (option, self.section, below, option, self.section, below))
+            raise self.error(
+                """{"code":"key255", "msg":"Error on '%s': %s must be below %s", "values":["%s","%s","%s"]}"""
+                % (option, self.section, below, option, self.section, below))
         return v
+
     def get(self, option, default=sentinel, note_valid=True):
         return self._get_wrapper(self.fileconfig.get, option, default,
                                  note_valid=note_valid)
+
     def getint(self, option, default=sentinel, minval=None, maxval=None,
                note_valid=True):
         return self._get_wrapper(self.fileconfig.getint, option, default,
                                  minval, maxval, note_valid=note_valid)
+
     def getfloat(self, option, default=sentinel, minval=None, maxval=None,
                  above=None, below=None, note_valid=True):
         return self._get_wrapper(self.fileconfig.getfloat, option, default,
                                  minval, maxval, above, below,
                                  note_valid=note_valid)
+
     def getboolean(self, option, default=sentinel, note_valid=True):
         return self._get_wrapper(self.fileconfig.getboolean, option, default,
                                  note_valid=note_valid)
+
     def getchoice(self, option, choices, default=sentinel, note_valid=True):
         if choices and type(list(choices.keys())[0]) == int:
             c = self.getint(option, default, note_valid=note_valid)
@@ -84,6 +93,7 @@ class ConfigWrapper:
             raise error("Choice '%s' for option '%s' in section '%s'"
                         " is not a valid choice" % (c, option, self.section))
         return choices[c]
+
     def getlists(self, option, default=sentinel, seps=(',',), count=None,
                  parser=str, note_valid=True):
         def lparser(value, pos):
@@ -96,33 +106,43 @@ class ConfigWrapper:
                 raise error("Option '%s' in section '%s' must have %d elements"
                             % (option, self.section, count))
             return tuple(res)
+
         def fcparser(section, option):
             return lparser(self.fileconfig.get(section, option), len(seps) - 1)
+
         return self._get_wrapper(fcparser, option, default,
                                  note_valid=note_valid)
+
     def getlist(self, option, default=sentinel, sep=',', count=None,
                 note_valid=True):
         return self.getlists(option, default, seps=(sep,), count=count,
                              parser=str, note_valid=note_valid)
+
     def getintlist(self, option, default=sentinel, sep=',', count=None,
                    note_valid=True):
         return self.getlists(option, default, seps=(sep,), count=count,
                              parser=int, note_valid=note_valid)
+
     def getfloatlist(self, option, default=sentinel, sep=',', count=None,
                      note_valid=True):
         return self.getlists(option, default, seps=(sep,), count=count,
                              parser=float, note_valid=note_valid)
+
     def getsection(self, section):
         return ConfigWrapper(self.printer, self.fileconfig,
                              self.access_tracking, section)
+
     def has_section(self, section):
         return self.fileconfig.has_section(section)
+
     def get_prefix_sections(self, prefix):
         return [self.getsection(s) for s in self.fileconfig.sections()
                 if s.startswith(prefix)]
+
     def get_prefix_options(self, prefix):
         return [o for o in self.fileconfig.options(self.section)
                 if o.startswith(prefix)]
+
     def deprecate(self, option, value=None):
         if not self.fileconfig.has_option(self.section, option):
             return
@@ -135,11 +155,13 @@ class ConfigWrapper:
         pconfig = self.printer.lookup_object("configfile")
         pconfig.deprecate(self.section, option, value, msg)
 
+
 AUTOSAVE_HEADER = """
 #*# <---------------------- SAVE_CONFIG ---------------------->
 #*# DO NOT EDIT THIS BLOCK OR BELOW. The contents are auto-generated.
 #*#
 """
+
 
 class PrinterConfig:
     def __init__(self, printer):
@@ -147,17 +169,25 @@ class PrinterConfig:
         self.autosave = None
         self.deprecated = {}
         self.status_raw_config = {}
+        self.status_save_pending = {}
         self.status_settings = {}
         self.status_warnings = []
         self.save_config_pending = False
         gcode = self.printer.lookup_object('gcode')
         gcode.register_command("SAVE_CONFIG", self.cmd_SAVE_CONFIG,
                                desc=self.cmd_SAVE_CONFIG_help)
+        gcode.register_command("CX_SAVE_CONFIG", self.cmd_CX_SAVE_CONFIG,
+                               desc=self.cmd_CX_SAVE_CONFIG_help)
         gcode.register_command("REMOVE_MCU_RPI_CONFIG", self.cmd_remove_mcu_rpi_CONFIG,
                                desc=self.cmd_remove_mcu_rpi_CONFIG_help)
+        gcode.register_command("SET_ROTATION_DISTANCE", self.cmd_SET_ROTATION_DISTANCE,
+                               desc=self.cmd_SET_ROTATION_DISTANCE_help)
+        gcode.register_command("SET_GEAR_RATIO", self.cmd_SET_GEAR_RATIO,
+                               desc=self.cmd_SET_GEAR_RATIO_help)
 
     def get_printer(self):
         return self.printer
+
     def _read_config_file(self, filename):
         try:
             f = open(filename, 'r')
@@ -168,6 +198,7 @@ class PrinterConfig:
             logging.exception(msg)
             raise error(msg)
         return data.replace('\r\n', '\n')
+
     def _find_autosave_data(self, data):
         regular_data = data
         autosave_data = ""
@@ -184,7 +215,7 @@ class PrinterConfig:
         for line in autosave_data.split('\n'):
             if ((not line.startswith("#*#")
                  or (len(line) >= 4 and not line.startswith("#*# ")))
-                and autosave_data):
+                    and autosave_data):
                 logging.warn("Can't read autosave from config file"
                              " - modifications after header")
                 return data, ""
@@ -341,18 +372,36 @@ class PrinterConfig:
         return {'config': self.status_raw_config,
                 'settings': self.status_settings,
                 'warnings': self.status_warnings,
-                'save_config_pending': self.save_config_pending}
+                'save_config_pending': self.save_config_pending,
+                'save_config_pending_items': self.status_save_pending}
     # Autosave functions
     def set(self, section, option, value):
         if not self.autosave.fileconfig.has_section(section):
             self.autosave.fileconfig.add_section(section)
         svalue = str(value)
         self.autosave.fileconfig.set(section, option, svalue)
+        pending = dict(self.status_save_pending)
+        if not section in pending or pending[section] is None:
+            pending[section] = {}
+        else:
+            pending[section] = dict(pending[section])
+        pending[section][option] = svalue
+        self.status_save_pending = pending
         self.save_config_pending = True
         logging.info("save_config: set [%s] %s = %s", section, option, svalue)
     def remove_section(self, section):
-        self.autosave.fileconfig.remove_section(section)
-        self.save_config_pending = True
+        if self.autosave.fileconfig.has_section(section):
+            self.autosave.fileconfig.remove_section(section)
+            pending = dict(self.status_save_pending)
+            pending[section] = None
+            self.status_save_pending = pending
+            self.save_config_pending = True
+        elif (section in self.status_save_pending and
+              self.status_save_pending[section] is not None):
+            pending = dict(self.status_save_pending)
+            del pending[section]
+            self.status_save_pending = pending
+            self.save_config_pending = True
     def _disallow_include_conflicts(self, regular_data, cfgname, gcode):
         config = self._build_config_wrapper(regular_data, cfgname)
         for section in self.autosave.fileconfig.sections():
@@ -361,7 +410,6 @@ class PrinterConfig:
                     msg = ("SAVE_CONFIG section '%s' option '%s' conflicts "
                            "with included value" % (section, option))
                     raise gcode.error(msg)
-
     def disable_mcu_rpi(self, cfg_path):
         import configparser
         cp = configparser.ConfigParser()
@@ -416,6 +464,7 @@ class PrinterConfig:
             f.writelines(lines)
 
     cmd_remove_mcu_rpi_CONFIG_help = "Remove mcu_rpi config"
+
     def cmd_remove_mcu_rpi_CONFIG(self, gcmd):
         self.remove_section("mcu rpi")
         self.remove_section("adxl345")
@@ -429,8 +478,80 @@ class PrinterConfig:
         # config.remove_section("resonance_tester")
         # config.write(open(cfgname, 'w'))
 
+    cmd_SET_GEAR_RATIO_help = "Overwrite config file cmd_SET_GEAR_RATIO"
+
+    def cmd_SET_GEAR_RATIO(self, gcmd):
+        if gcmd.get("GEAR_RATIO") == None:
+            return
+        key = "gear_ratio: %s\n" % gcmd.get("GEAR_RATIO")
+        cfg_path = self.printer.get_start_args()['config_file']
+        flag = False
+        start_index = 0
+        end_index = 0
+        with open(cfg_path) as f:
+            lines = f.readlines()
+            for index, line in enumerate(lines):
+                if line.startswith("#"):
+                    continue
+                if line.startswith("[extruder]"):
+                    flag = True
+                    start_index = index
+                if flag == True and line.startswith("[") and not line.startswith("[extruder]"):
+                    end_index = index
+                    break
+            if start_index > 0 and end_index > start_index:
+                import copy
+                new_lines = copy.deepcopy(lines)
+                rotation_distance_write_state = False
+                for index, line in enumerate(lines):
+                    if start_index < index < end_index and line.startswith("gear_ratio"):
+                        new_lines[index] = key
+                        rotation_distance_write_state = True
+                if not rotation_distance_write_state:
+                    new_lines.insert(start_index + 1, key)
+
+                with open(cfg_path, "w+") as f:
+                    f.writelines(new_lines)
+                    f.flush()
+
+    cmd_SET_ROTATION_DISTANCE_help = "Overwrite config file cmd_SET_ROTATION_DISTANCE"
+
+    def cmd_SET_ROTATION_DISTANCE(self, gcmd):
+        if gcmd.get("ROTATION_DISTANCE") == None:
+            return
+        key = "rotation_distance: %s\n" % gcmd.get("ROTATION_DISTANCE")
+        cfg_path = self.printer.get_start_args()['config_file']
+        flag = False
+        start_index = 0
+        end_index = 0
+        with open(cfg_path) as f:
+            lines = f.readlines()
+            for index, line in enumerate(lines):
+                if line.startswith("#"):
+                    continue
+                if line.startswith("[extruder]"):
+                    flag = True
+                    start_index = index
+                if flag == True and line.startswith("[") and not line.startswith("[extruder]"):
+                    end_index = index
+                    break
+            if start_index > 0 and end_index > start_index:
+                import copy
+                new_lines = copy.deepcopy(lines)
+                rotation_distance_write_state = False
+                for index, line in enumerate(lines):
+                    if start_index < index < end_index and line.startswith("rotation_distance"):
+                        new_lines[index] = key
+                        rotation_distance_write_state = True
+                if not rotation_distance_write_state:
+                    new_lines.insert(start_index + 1, key)
+
+                with open(cfg_path, "w+") as f:
+                    f.writelines(new_lines)
+                    f.flush()
 
     cmd_SAVE_CONFIG_help = "Overwrite config file and restart"
+
     def cmd_SAVE_CONFIG(self, gcmd):
         # self.cmd_remove_mcu_rpi_CONFIG(gcmd)
         if not self.autosave.fileconfig.sections():
@@ -481,3 +602,53 @@ class PrinterConfig:
             raise gcode.error(msg)
         # Request a restart
         gcode.request_restart('restart')
+
+    cmd_CX_SAVE_CONFIG_help = "Overwrite config file and do not restart"
+
+    def cmd_CX_SAVE_CONFIG(self, gcmd):
+        if not self.autosave.fileconfig.sections():
+            return
+        gcode = self.printer.lookup_object('gcode')
+        # Create string containing autosave data
+        autosave_data = self._build_config_string(self.autosave)
+        lines = [('#*# ' + l).strip()
+                 for l in autosave_data.split('\n')]
+        lines.insert(0, "\n" + AUTOSAVE_HEADER.rstrip())
+        lines.append("")
+        autosave_data = '\n'.join(lines)
+        # Read in and validate current config file
+        cfgname = self.printer.get_start_args()['config_file']
+        try:
+            data = self._read_config_file(cfgname)
+            regular_data, old_autosave_data = self._find_autosave_data(data)
+            config = self._build_config_wrapper(regular_data, cfgname)
+        except error as e:
+            msg = "Unable to parse existing config on SAVE_CONFIG"
+            logging.exception(msg)
+            raise gcode.error(msg)
+        regular_data = self._strip_duplicates(regular_data, self.autosave)
+        self._disallow_include_conflicts(regular_data, cfgname, gcode)
+        data = regular_data.rstrip() + autosave_data
+        # Determine filenames
+        datestr = time.strftime("-%Y%m%d_%H%M%S")
+        backup_name = cfgname + datestr
+        temp_name = cfgname + "_autosave"
+        if cfgname.endswith(".cfg"):
+            backup_name = cfgname[:-4] + datestr + ".cfg"
+            temp_name = cfgname[:-4] + "_autosave.cfg"
+        # Create new config file with temporary name and swap with main config
+        logging.info("SAVE_CONFIG to '%s' (backup in '%s')",
+                     cfgname, backup_name)
+        try:
+            f = open(temp_name, 'w')
+            f.write(data)
+            f.close()
+            os.rename(cfgname, backup_name)
+            os.rename(temp_name, cfgname)
+            os.system("sync")
+        except:
+            msg = "Unable to write config file during SAVE_CONFIG"
+            logging.exception(msg)
+            raise gcode.error(msg)
+        # Request a restart
+        # gcode.request_restart('restart')

@@ -134,7 +134,7 @@ class BLTouchEndstopWrapper:
                 break
             if retry >= 2:
                 raise self.printer.command_error(
-                    '{"code": "key8", "msg": "BLTouch failed to raise probe"}')
+                    """{"code": "key8", "msg": "BLTouch failed to raise probe"}""")
             msg = "Failed to verify BLTouch probe is raised; retrying."
             self.gcode.respond_info(msg)
             self.sync_mcu_print_time()

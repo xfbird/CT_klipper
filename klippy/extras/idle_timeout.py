@@ -22,8 +22,7 @@ class IdleTimeout:
         self.gcode = self.printer.lookup_object('gcode')
         self.toolhead = self.timeout_timer = None
         self.printer.register_event_handler("klippy:ready", self.handle_ready)
-        self.idle_timeout = config.getfloat('timeout', 3600., above=0.)
-        self.is_valid = config.getboolean('is_valid', True)
+        self.idle_timeout = config.getfloat('timeout', 600., above=0.)
         gcode_macro = self.printer.load_object(config, 'gcode_macro')
         self.idle_gcode = gcode_macro.load_template(config, 'gcode',
                                                     DEFAULT_IDLE_GCODE)
@@ -32,12 +31,11 @@ class IdleTimeout:
                                     desc=self.cmd_SET_IDLE_TIMEOUT_help)
         self.state = "Idle"
         self.last_print_start_systime = 0.
-        self.is_idle_timeout = True
     def get_status(self, eventtime):
         printing_time = 0.
         if self.state == "Printing":
             printing_time = eventtime - self.last_print_start_systime
-        return { "state": self.state, "printing_time": printing_time, "is_idle_timeout": self.is_idle_timeout}
+        return { "state": self.state, "printing_time": printing_time }
     def handle_ready(self):
         self.toolhead = self.printer.lookup_object('toolhead')
         self.timeout_timer = self.reactor.register_timer(self.timeout_handler)
@@ -66,20 +64,14 @@ class IdleTimeout:
             return eventtime + self.idle_timeout
         if idle_time < self.idle_timeout:
             # Wait for idle timeout
-            # self.is_idle_timeout = False
-            # logging.info("------------------------------68:self.is_idle_timeout = False")
             return eventtime + self.idle_timeout - idle_time
         if self.gcode.get_mutex().test():
             # Gcode class busy
             return eventtime + 1.
         # Idle timeout has elapsed
-        logging.info("------------------------------75:self.is_idle_timeout = True")
-        self.is_idle_timeout = True
         return self.transition_idle_state(eventtime)
     def timeout_handler(self, eventtime):
         if self.printer.is_shutdown():
-            return self.reactor.NEVER
-        if not self.is_valid:
             return self.reactor.NEVER
         if self.state == "Ready":
             return self.check_idle_timeout(eventtime)
@@ -92,8 +84,6 @@ class IdleTimeout:
             return eventtime + READY_TIMEOUT + max(0., buffer_time)
         if buffer_time > -READY_TIMEOUT:
             # Wait for ready timeout
-            # self.is_idle_timeout = False
-            # logging.info("------------------------------93:self.is_idle_timeout = False")
             return eventtime + READY_TIMEOUT + buffer_time
         if self.gcode.get_mutex().test():
             # Gcode class busy
@@ -102,8 +92,6 @@ class IdleTimeout:
         self.state = "Ready"
         self.printer.send_event("idle_timeout:ready",
                                 est_print_time + PIN_MIN_TIME)
-        logging.info("------------------------------102:self.is_idle_timeout = False")
-        self.is_idle_timeout = False
         return eventtime + self.idle_timeout
     def handle_sync_print_time(self, curtime, print_time, est_print_time):
         if self.state == "Printing":

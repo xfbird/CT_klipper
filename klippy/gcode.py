@@ -5,8 +5,9 @@
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import os, re, logging, collections, shlex
 import sys
-reload(sys)
-sys.setdefaultencoding('utf8')
+if sys.version_info.major == 2:
+    reload(sys)
+    sys.setdefaultencoding('utf8')
 
 class CommandError(Exception):
     pass
@@ -30,20 +31,19 @@ class GCodeCommand:
     def get_command_parameters(self):
         return self._params
     def get_raw_command_parameters(self):
-        rawparams = self._commandline
         command = self._command
+        if command.startswith("M117 ") or command.startswith("M118 "):
+            command = command[:4]
+        rawparams = self._commandline
         urawparams = rawparams.upper()
         if not urawparams.startswith(command):
-            start = urawparams.find(command)
+            rawparams = rawparams[urawparams.find(command):]
             end = rawparams.rfind('*')
             if end >= 0:
                 rawparams = rawparams[:end]
-            rawparams = rawparams[start:]
-        commandlen = len(command) + 1
-        if len(rawparams) > commandlen:
-            rawparams = rawparams[commandlen:]
-        else:
-            rawparams = ''
+        rawparams = rawparams[len(command):]
+        if rawparams.startswith(' '):
+            rawparams = rawparams[1:]
         return rawparams
     def ack(self, msg=None):
         if not self._need_ack:
@@ -262,8 +262,17 @@ class GCodeDispatch:
         r'(?P<cmd>[a-zA-Z_][a-zA-Z0-9_]+)(?:\s+|$)'
         r'(?P<args>[^#*;]*?)'
         r'\s*(?:[#*;].*)?$')
+    extended_r1 = re.compile(
+        r'^\s*(?:N[0-9]+\s*)?'
+        r'(?P<cmd>[a-zA-Z_][a-zA-Z0-9_]+)(?:\s+|$)'
+        r'(?P<args>[^\|*;]*?)'
+        r'\s*(?:[\|*;].*)?$')
     def _get_extended_params(self, gcmd):
-        m = self.extended_r.match(gcmd.get_commandline())
+        if gcmd.get_commandline().startswith("SDCARD_PRINT_FILE"):
+            # Support filename contain '#'
+            m = self.extended_r1.match(gcmd.get_commandline())
+        else:
+            m = self.extended_r.match(gcmd.get_commandline())
         if m is None:
             raise self.error("Malformed command '%s'"
                              % (gcmd.get_commandline(),))
@@ -280,6 +289,9 @@ class GCodeDispatch:
     # G-Code special command handlers
     def cmd_default(self, gcmd):
         cmd = gcmd.get_command()
+        if cmd == 'M5':
+            # return if M5 gcode_marco not exists
+            return
         if cmd == 'M105':
             # Don't warn about temperature requests when not ready
             gcmd.ack("T:0")
@@ -295,15 +307,15 @@ class GCodeDispatch:
             if cmdline:
                 logging.debug(cmdline)
             return
-        if cmd.startswith("M117 "):
-            # Handle M117 gcode with numeric and special characters
-            handler = self.gcode_handlers.get("M117", None)
+        if cmd.startswith("M117 ") or cmd.startswith("M118 "):
+            # Handle M117/M118 gcode with numeric and special characters
+            handler = self.gcode_handlers.get(cmd[:4], None)
             if handler is not None:
                 handler(gcmd)
                 return
         elif cmd in ['M140', 'M104'] and not gcmd.get_float('S', 0.):
-            # Don't warn about requests to turn off heaters when not present
-            return
+                # Don't warn about requests to turn off heaters when not present
+                return
         elif cmd == 'M107' or (cmd == 'M106' and (
                 not gcmd.get_float('S', 1.) or self.is_fileinput)):
             # Don't warn about requests to turn off fan when fan not present
@@ -396,7 +408,6 @@ class GCodeIO:
         self.pending_commands = []
         self.bytes_read = 0
         self.input_log = collections.deque([], 50)
-
     def _handle_ready(self):
         self.is_printer_ready = True
         if self.is_fileinput and self.fd_handle is None:
@@ -465,7 +476,7 @@ class GCodeIO:
     def _respond_raw(self, msg):
         if self.pipe_is_active:
             try:
-                logging.info("++++++++++++++msg:%s" % msg)
+                # logging.error("++++++++++++++msg:%s" % msg)
                 os.write(self.fd, (msg+"\n").encode())
             except os.error:
                 logging.exception("Write g-code response")

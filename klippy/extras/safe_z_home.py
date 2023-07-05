@@ -21,7 +21,8 @@ class SafeZHoming:
         self.gcode.register_command("G28", self.cmd_G28)
 
         if config.has_section("homing_override"):
-            raise config.error("""{"code":"key106", "msg": "homing_override and safe_z_homing cannot be used simultaneously", "values": []}""")
+            raise config.error("homing_override and safe_z_homing cannot"
+                               +" be used simultaneously")
 
     def cmd_G28(self, gcmd):
         toolhead = self.printer.lookup_object('toolhead')
@@ -78,7 +79,10 @@ class SafeZHoming:
             self.prev_G28(g28_gcmd)
             # Perform Z Hop again for pressure-based probes
             if self.z_hop:
-                toolhead.manual_move([None, None, self.z_hop], self.z_hop_speed)
+                pos = toolhead.get_position()
+                if pos[2] < self.z_hop:
+                    toolhead.manual_move([None, None, self.z_hop],
+                                         self.z_hop_speed)
             # Move XY back to previous positions
             if self.move_to_previous:
                 toolhead.manual_move(prevpos[:2], self.speed)

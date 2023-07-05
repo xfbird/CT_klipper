@@ -11,9 +11,11 @@ def load_config(config):
 def load_config_prefix(config):
     if not config.has_section('display'):
         raise config.error(
-            """{"code":"key192", "msg": "A primary [display] section must be defined in printer.cfg to use auxilary displays", "values": []}""")
+            "A primary [display] section must be defined in printer.cfg "
+            "to use auxilary displays")
     name = config.get_name().split()[-1]
     if name == "display":
         raise config.error(
-            """{"code":"key193", "msg": "Section name [display display] is not valid. Please choose a different postfix.", "values": []}""")
+            "Section name [display display] is not valid. "
+            "Please choose a different postfix.")
     return display.load_config(config)

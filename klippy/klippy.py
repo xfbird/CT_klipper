@@ -153,6 +153,9 @@ class Printer:
             return ""
     def _connect(self, eventtime):
         try:
+            import threading
+            t = threading.Thread(target=self._record_local_log, args=("reconnect",))
+            t.start()
             self._read_config()
             self.send_event("klippy:mcu_identify")
             for cb in self.event_handlers.get("klippy:connect", []):
@@ -195,7 +198,8 @@ class Printer:
             return
         except msgproto.error as e:
             logging.exception("Protocol error")
-            self._set_state("%s\n%s%s%s" % (str(e), message_protocol_error1,
+            self._set_state("%s\n%"
+                            "s%s%s" % (str(e), message_protocol_error1,
                                           self._get_versions(),
                                           message_protocol_error2))
             util.dump_mcu_build()
@@ -218,6 +222,9 @@ class Printer:
             self._set_state(message_ready)
             logging.info("+++++++++++++++printer_ready")
 
+            import threading
+            t = threading.Thread(target=self._record_local_log, args=("printer_ready",))
+            t.start()
             for cb in self.event_handlers.get("klippy:ready", []):
                 if self.state_message is not message_ready:
                     return
@@ -250,8 +257,7 @@ class Printer:
         run_result = self.run_result
         try:
             if run_result == 'firmware_restart':
-                for n, m in self.lookup_objects(module='mcu'):
-                    m.microcontroller_restart()
+                self.send_event("klippy:firmware_restart")
             self.send_event("klippy:disconnect")
         except:
             logging.exception("Unhandled exception during post run")
@@ -293,11 +299,55 @@ class Printer:
         except Exception as e:
             pass
 
+    def _record_local_log(self, msg):
+        global api_server_index
+        # if os.path.exists("/etc/init.d/klipper_service.2"):
+        #     multi_printer_info = self.get_yaml_info(MULTI_PRINTER_PATH)
+        #     multi_printer_info_list = multi_printer_info.get("multi_printer_info")
+        #     for printer_info in multi_printer_info_list:
+        #         if str(printer_info.get("printer_id")) == api_server_index:
+        #             if msg == "invoke_shutdown":
+        #                 printer_info["status"] = 0
+        #             elif msg == "printer_ready":
+        #                 printer_info["status"] = 1
+        #             elif msg == "init_status":
+        #                 printer_info["status"] = 0
+        #                 self.set_yaml_info(MULTI_PRINTER_PATH, multi_printer_info)
+        #                 return
+        #             self.set_yaml_info(MULTI_PRINTER_PATH, multi_printer_info)
+        #             break
+
+        if msg == "invoke_shutdown":
+            with open("/mnt/UDISK/.crealityprint/printer%s_stat" % api_server_index, "w+") as f:
+                logging.info("/mnt/UDISK/.crealityprint/printer%s_stat set invoke_shutdown" % api_server_index)
+                f.write("0")
+        elif msg == "printer_ready":
+            logging.info("/mnt/UDISK/.crealityprint/printer%s_stat set printer_ready" % api_server_index)
+            with open("/mnt/UDISK/.crealityprint/printer%s_stat" % api_server_index, "w+") as f:
+                f.write("1")
+        elif msg == "reconnect":
+            logging.info("/mnt/UDISK/.crealityprint/printer%s_stat set reconnect" % api_server_index)
+            with open("/mnt/UDISK/.crealityprint/printer%s_stat" % api_server_index, "w+") as f:
+                f.write("0")
+
+        url = "http://127.0.0.1:8000/settings/machine_info/?method=record_log_to_remote_sererver&message=%s&index=%s" % (
+                msg, api_server_index)
+        logging.info(url)
+        from sys import version_info
+        if version_info.major == 2:
+            import urllib2
+            urllib2.urlopen(url)
+        else:
+            import urllib.request
+            urllib.request.urlopen(url)
 
     def invoke_shutdown(self, msg):
         if self.in_shutdown_state:
             return
         logging.info("+++++++++++++++invoke_shutdown")
+        import threading
+        t = threading.Thread(target=self._record_local_log, args=("invoke_shutdown",))
+        t.start()
         logging.error("Transition to shutdown state: %s", msg)
         self.in_shutdown_state = True
         if "{" in msg:
@@ -383,17 +433,51 @@ def main():
     opts.add_option("--import-test", action="store_true",
                     help="perform an import module test")
     options, args = opts.parse_args()
+    config_path = args[0].replace("//", "/")
+    lines = []
+    is_exclude_object_exists = False
+    exclude_object_flag = "/mnt/UDISK/.crealityprint/%s_exclude_object.txt" % config_path.split("/")[-2]
+    if not os.path.exists(exclude_object_flag):
+        with open(exclude_object_flag, "w") as f:
+            f.write("1")
+            f.flush()
+        with open(config_path, "r") as f:
+            lines = f.readlines()
+        for obj in lines:
+            if obj.startswith("[exclude_object]"):
+                is_exclude_object_exists = True
+        # 文件中没有exclude_object字段
+        if not is_exclude_object_exists:
+            flag = False
+            flag_index = -1
+            with open(config_path, "r") as f:
+                data = f.readlines()
+                for index, obj in enumerate(data):
+                    if obj.startswith("[printer]"):
+                        flag = True
+                    if flag and obj == "\n":
+                        flag_index = index
+                        break
+            if flag_index != -1:
+                data.insert(flag_index, "\n[exclude_object]\n")
+            with open(config_path, "w") as f:
+                f.writelines(data)
+                f.flush()
     if options.apiserver:
         index = options.apiserver[-1]
         global api_server_index
         if index == "2" or index == "3" or index == "4":
             api_server_index = index
             timelapse_cfg_obj = "/mnt/UDISK/printer_config" + index + "/timelapse.cfg"
+            # creality_obj = "/mnt/UDISK/printer_config" + index + "/creality"
         else:
             api_server_index = "1"
             timelapse_cfg_obj = "/mnt/UDISK/printer_config/timelapse.cfg"
+            # creality_obj = "/mnt/UDISK/printer_config/creality"
         if not os.path.exists(timelapse_cfg_obj):
             os.system("/bin/cp /usr/share/klipper-brain/printer_config/timelapse.cfg %s && sync" % timelapse_cfg_obj)
+        # if not os.path.exists(creality_obj):
+        #     os.system("/bin/cp -r /usr/share/klipper-brain/printer_config/config/creality %s && sync" % creality_obj)
 
         with open("/mnt/UDISK/.crealityprint/printer%s_stat" % api_server_index, "w+") as f:
             logging.info("/mnt/UDISK/.crealityprint/printer%s_stat set init invoke_shutdown status" % api_server_index)
@@ -405,6 +489,7 @@ def main():
     start_args = {'config_file': args[0], 'apiserver': options.apiserver,
                   'start_reason': 'startup'}
 
+    # debuglevel = logging.INFO
     debuglevel = logging.ERROR
     if options.verbose:
         debuglevel = logging.DEBUG

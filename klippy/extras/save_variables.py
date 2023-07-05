@@ -12,6 +12,8 @@ class SaveVariables:
         self.filename = os.path.expanduser(config.get('filename'))
         self.allVariables = {}
         try:
+            if not os.path.exists(self.filename):
+                open(self.filename, "w").close()
             self.loadVariables()
         except self.printer.command_error as e:
             raise config.error(str(e))
@@ -27,7 +29,7 @@ class SaveVariables:
                 for name, val in varfile.items('Variables'):
                     allvars[name] = ast.literal_eval(val)
         except:
-            msg = """{"code": "key284", "msg": ""Unable to parse existing variable file", "values": []}"""
+            msg = "Unable to parse existing variable file"
             logging.exception(msg)
             raise self.printer.command_error(msg)
         self.allVariables = allvars
@@ -38,7 +40,7 @@ class SaveVariables:
         try:
             value = ast.literal_eval(value)
         except ValueError as e:
-            raise gcmd.error("""{"code": "key285", "msg": "Unable to parse '%s' as a literal", "values": ["%s"]}""" % (value, value))
+            raise gcmd.error("Unable to parse '%s' as a literal" % (value,))
         newvars = dict(self.allVariables)
         newvars[varname] = value
         # Write file
@@ -51,10 +53,9 @@ class SaveVariables:
             varfile.write(f)
             f.close()
         except:
-            msg = """{"code": "key286", "msg": "Unable to save variable", "values": []}"""
+            msg = "Unable to save variable"
             logging.exception(msg)
             raise gcmd.error(msg)
-        gcmd.respond_info("Variable Saved")
         self.loadVariables()
     def get_status(self, eventtime):
         return {'variables': self.allVariables}

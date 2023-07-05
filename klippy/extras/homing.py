@@ -18,7 +18,8 @@ def multi_complete(printer, completions):
     cp = reactor.register_callback(lambda e: [c.wait() for c in completions])
     # If any completion indicates an error, then exit main completion early
     for c in completions:
-        reactor.register_callback(lambda e: cp.complete(1) if c.wait() else 0)
+        reactor.register_callback(
+            lambda e, c=c: cp.complete(1) if c.wait() else 0)
     return cp
 
 # Tracking of stepper positions during a homing/probing move
@@ -101,9 +102,11 @@ class HomingMove:
             if trigger_time > 0.:
                 trigger_times[name] = trigger_time
             elif trigger_time < 0. and error is None:
-                error = """{"code":"key21", "msg":"Communication timeout during homing %s", "values": ["%s"]}""" % (name, name)
+                error = """{"code":"key21", "msg":"Communication timeout during homing %s", "values": ["%s"]}""" % (
+                name, name)
             elif check_triggered and error is None:
-                error = """{"code":"key22", "msg":"No trigger on %s after full movement", "values": ["%s"]}""" % (name, name)
+                error = """{"code":"key22", "msg":"No trigger on %s after full movement", "values": ["%s"]}""" % (
+                name, name)
         # Determine stepper halt positions
         self.toolhead.flush_step_generation()
         for sp in self.stepper_positions:

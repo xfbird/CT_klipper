@@ -109,8 +109,8 @@ class PrinterSkew:
                         raise Exception
                 except Exception:
                     raise gcmd.error(
-                        """{"code": "key315", "msg": "skew_correction: improperly formatted entry for plane [%s]\n%s", "values":["%s", "%s"]}""" % (
-                            plane, gcmd.get_commandline(), plane, gcmd.get_commandline()))
+                        "skew_correction: improperly formatted entry for "
+                        "plane [%s]\n%s" % (plane, gcmd.get_commandline()))
                 factor = plane.lower() + '_factor'
                 setattr(self, factor, calc_skew_factor(*lengths))
     cmd_SKEW_PROFILE_help = "Profile management for skew_correction"
@@ -143,7 +143,7 @@ class PrinterSkew:
                 "update the printer config file and restart the printer."
                 % (name))
         elif gcmd.get('REMOVE', None) is not None:
-            name = gmcd.get('REMOVE')
+            name = gcmd.get('REMOVE')
             if name in self.skew_profiles:
                 configfile = self.printer.lookup_object('configfile')
                 configfile.remove_section('skew_correction ' + name)

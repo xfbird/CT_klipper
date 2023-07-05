@@ -37,7 +37,7 @@ class TuningTower:
             raise gcmd.error(
                 "Cannot specify both FACTOR and STEP_DELTA/STEP_HEIGHT")
         if (self.step_delta != 0.) != (self.step_height != 0.):
-            raise gcmd.error("Must specify both STEP_DELTA and STEP_HEIGHT")
+            raise gcmd.error("""{"code":"key103", "msg": "Must specify both STEP_DELTA and STEP_HEIGHT", "values": []}""")
         # Enable test mode
         if self.gcode.is_traditional_gcode(command):
             self.command_fmt = "%s %s%%.9f" % (command, parameter)
@@ -99,6 +99,8 @@ class TuningTower:
         self.gcode.respond_info("Ending tuning test mode")
         self.gcode_move.set_move_transform(self.normal_transform, force=True)
         self.normal_transform = None
+    def is_active(self):
+        return self.normal_transform is not None
 
 def load_config(config):
     return TuningTower(config)
